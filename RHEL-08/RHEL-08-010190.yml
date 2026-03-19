@@ -1,0 +1,39 @@
+---
+# STIG ID:   RHEL-08-010190
+# Vuln ID:   V-230243
+# Rule Title: A sticky bit must be set on all RHEL 8 public directories to
+#             prevent unauthorized and unintended information transferred via
+#             shared system resources.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-001090
+# Check:     sudo find / -type d \( -perm -0002 -a ! -perm -1000 \) 2>/dev/null -exec ls -ald {} \;
+#            Any result is a finding.
+# Fix:       sudo chmod 1777 <world-writable directory>
+
+- name: STIG RHEL-08-010190 - Set sticky bit on all world-writable directories
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Find world-writable directories missing the sticky bit
+      ansible.builtin.command:
+        cmd: find / -xdev -type d -perm -0002 ! -perm -1000
+      register: missing_sticky
+      changed_when: false
+      failed_when: false
+
+    - name: Set sticky bit on world-writable directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        mode: '1777'
+        state: directory
+      loop: "{{ missing_sticky.stdout_lines }}"
+      when: missing_sticky.stdout_lines | length > 0
+
+    - name: Verify no world-writable directories are missing the sticky bit
+      ansible.builtin.command:
+        cmd: find / -xdev -type d -perm -0002 ! -perm -1000
+      register: verify_sticky
+      changed_when: false
+      failed_when: verify_sticky.stdout_lines | length > 0

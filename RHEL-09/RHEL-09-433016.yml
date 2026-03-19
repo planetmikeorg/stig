@@ -1,0 +1,81 @@
+---
+# STIG ID:   RHEL-09-433016
+# Vuln ID:   V-270180
+# Rule Title: The RHEL 9 fapolicy module must be configured to employ a deny-all,
+#             permit-by-exception policy to allow the execution of authorized software programs.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-001764
+# Check:     grep permissive /etc/fapolicyd/fapolicyd.conf -> permissive = 0
+#            tail /etc/fapolicyd/compiled.rules includes: deny perm=any all : all
+# Fix:       Configure fapolicyd enforcing mode and deny-all terminal rule.
+
+- name: STIG RHEL-09-433016 - Configure fapolicyd deny-all permit-by-exception policy
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    fapolicyd_conf: /etc/fapolicyd/fapolicyd.conf
+    fapolicyd_conf_src: files/RHEL-09-433016/fapolicyd.conf
+    deny_all_rules_src: files/RHEL-09-433016/99-deny-all.rules
+    deny_all_rule: "deny perm=any all : all"
+
+  tasks:
+    - name: Ensure fapolicyd package is installed
+      ansible.builtin.package:
+        name: fapolicyd
+        state: present
+
+    - name: Deploy managed fapolicyd.conf from playbook files
+      ansible.builtin.copy:
+        src: "{{ fapolicyd_conf_src }}"
+        dest: "{{ fapolicyd_conf }}"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+      notify: Restart fapolicyd
+
+    - name: Deploy managed deny-all rules file from playbook files
+      ansible.builtin.copy:
+        src: "{{ deny_all_rules_src }}"
+        dest: /etc/fapolicyd/rules.d/99-deny-all.rules
+        owner: root
+        group: fapolicyd
+        mode: '0640'
+      notify: Rebuild compiled fapolicyd rules
+
+    - name: Enable and start fapolicyd service
+      ansible.builtin.service:
+        name: fapolicyd
+        enabled: true
+        state: started
+
+    - name: Flush handlers to apply/compile rules before verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify fapolicyd is enforcing
+      ansible.builtin.command:
+        cmd: grep -P '^\s*permissive\s*=\s*0\b' "{{ fapolicyd_conf }}"
+      register: permissive_check
+      changed_when: false
+      failed_when: permissive_check.rc != 0
+
+    - name: Verify compiled rules include deny-all terminal rule
+      ansible.builtin.command:
+        cmd: tail -n 5 /etc/fapolicyd/compiled.rules
+      register: compiled_rules_check
+      changed_when: false
+      failed_when: deny_all_rule not in compiled_rules_check.stdout
+
+  handlers:
+    - name: Rebuild compiled fapolicyd rules
+      ansible.builtin.command:
+        cmd: fagenrules --load
+      changed_when: true
+      notify: Restart fapolicyd
+
+    - name: Restart fapolicyd
+      ansible.builtin.service:
+        name: fapolicyd
+        state: restarted

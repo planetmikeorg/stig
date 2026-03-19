@@ -1,0 +1,151 @@
+---
+# STIG ID:   RHEL-08-010770
+# Vuln ID:   V-230325
+# Rule Title: All RHEL 8 local initialization files must have mode 0740 or
+#             less permissive.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-000366
+# SRG:       SRG-OS-000480-GPOS-00227
+# Check:     ls -al /home/<user>/.[^.]*
+#            Any local initialization file mode more permissive than 0740 is a finding.
+# Fix:       chmod 0740 /home/<user>/.<INIT_FILE>
+
+- name: STIG RHEL-08-010770 - Enforce mode 0740 on local initialization files
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    local_init_file_names:
+      - .bash_profile
+      - .bash_login
+      - .bash_logout
+      - .bashrc
+      - .profile
+      - .kshrc
+      - .cshrc
+      - .tcshrc
+      - .zshrc
+      - .zprofile
+      - .zlogin
+      - .zlogout
+      - .zshenv
+
+  tasks:
+    - name: Collect local users from passwd database
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: Build list of real user home directories plus /root
+      ansible.builtin.set_fact:
+        target_home_dirs: >-
+          {{
+            (
+              ansible_facts.getent_passwd
+              | dict2items
+              | map(attribute='value')
+              | map('last')
+              | reject('equalto', '')
+              | reject('equalto', '/')
+              | select('match', '^/')
+              | list
+            )
+            + ['/root']
+          | unique | list }}
+
+    - name: Keep only existing home directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ target_home_dirs }}"
+      register: home_dir_stats
+
+    - name: Finalize list of existing home directories to scan
+      ansible.builtin.set_fact:
+        existing_home_dirs: >-
+          {{
+            home_dir_stats.results
+            | selectattr('stat.exists', 'equalto', true)
+            | selectattr('stat.isdir', 'equalto', true)
+            | map(attribute='item')
+            | list
+          }}
+
+    - name: Find local initialization files in discovered home directories
+      ansible.builtin.find:
+        paths: "{{ item }}"
+        recurse: false
+        file_type: file
+        patterns: "{{ local_init_file_names }}"
+        hidden: true
+        follow: false
+        use_regex: false
+      loop: "{{ existing_home_dirs }}"
+      register: init_files_found
+      changed_when: false
+
+    - name: Build flat list of discovered local initialization files
+      ansible.builtin.set_fact:
+        discovered_init_files: >-
+          {{
+            init_files_found.results
+            | map(attribute='files')
+            | flatten
+            | list
+          }}
+
+    - name: Build list of noncompliant local initialization files
+      ansible.builtin.set_fact:
+        noncompliant_init_files: []
+
+    - name: Identify local initialization files more permissive than 0740
+      ansible.builtin.set_fact:
+        noncompliant_init_files: "{{ noncompliant_init_files + [item.path] }}"
+      loop: "{{ discovered_init_files }}"
+      when: item.mode[-3:] is not match('^[0-7][0-4]0$')
+
+    - name: Set mode 0740 on noncompliant local initialization files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        mode: '0740'
+        state: file
+      loop: "{{ noncompliant_init_files }}"
+      when: noncompliant_init_files | length > 0
+
+    - name: Verify no local initialization files remain more permissive than 0740
+      ansible.builtin.find:
+        paths: "{{ item }}"
+        recurse: false
+        file_type: file
+        patterns: "{{ local_init_file_names }}"
+        hidden: true
+        follow: false
+        use_regex: false
+      loop: "{{ existing_home_dirs }}"
+      register: init_files_verify_found
+      changed_when: false
+
+    - name: Build flat list of discovered local initialization files after remediation
+      ansible.builtin.set_fact:
+        discovered_init_files_after_fix: >-
+          {{
+            init_files_verify_found.results
+            | map(attribute='files')
+            | flatten
+            | list
+          }}
+
+    - name: Build list of remaining noncompliant files after remediation
+      ansible.builtin.set_fact:
+        noncompliant_after_fix: []
+
+    - name: Identify remaining noncompliant local initialization files
+      ansible.builtin.set_fact:
+        noncompliant_after_fix: "{{ noncompliant_after_fix + [item.path] }}"
+      loop: "{{ discovered_init_files_after_fix }}"
+      when: item.mode[-3:] is not match('^[0-7][0-4]0$')
+
+    - name: Fail if any noncompliant local initialization files remain
+      ansible.builtin.fail:
+        msg: >-
+          RHEL-08-010770 noncompliant files remain: {{ noncompliant_after_fix | join(', ') }}
+      when: noncompliant_after_fix | length > 0

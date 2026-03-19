@@ -1,0 +1,61 @@
+---
+# STIG ID:   RHEL-08-010149
+# Vuln ID:   V-244522
+# Rule Title: RHEL 8 operating systems booted with a BIOS must require a
+#             unique superusers name upon booting into single-user and
+#             maintenance modes.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-000213
+# Check:     sudo grep -iw "superusers" /boot/grub2/grub.cfg
+#            Must return:  set superusers="<unique_name>"
+# Fix:       Write /etc/grub.d/01_users and regenerate /boot/grub2/grub.cfg
+# Note:      NOT APPLICABLE on UEFI systems.
+#            Run RHEL-08-010150.yml first to ensure user.cfg exists with a
+#            valid GRUB2_PASSWORD before running this playbook.
+
+- name: STIG RHEL-08-010149 - Require unique GRUB2 superusers name (BIOS systems)
+  hosts: all
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars.yml
+
+  pre_tasks:
+    - name: Skip play on UEFI systems (Not Applicable)
+      ansible.builtin.meta: end_host
+      when: ansible_facts['firmware_type'] | default('') == 'efi'
+
+  tasks:
+    - name: Write /etc/grub.d/01_users with unique superusers name
+      ansible.builtin.copy:
+        dest: "{{ grub2_users_script }}"
+        content: |
+          #!/bin/sh -e
+          cat << EOF
+          set superusers="{{ grub2_superusers }}"
+          export superusers
+          password_pbkdf2 {{ grub2_superusers }} ${GRUB2_PASSWORD}
+          EOF
+        owner: root
+        group: root
+        mode: '0755'
+        backup: true
+      notify: Regenerate grub.cfg
+
+    - name: Flush handlers to regenerate grub.cfg before verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify unique superusers name is present in grub.cfg
+      ansible.builtin.command:
+        cmd: grep -iw superusers "{{ grub2_cfg }}"
+      register: grub2_superusers_check
+      changed_when: false
+      failed_when: >
+        grub2_superusers_check.rc != 0 or
+        grub2_superusers | string not in grub2_superusers_check.stdout
+
+  handlers:
+    - name: Regenerate grub.cfg
+      ansible.builtin.command:
+        cmd: grub2-mkconfig -o "{{ grub2_cfg }}"
+      changed_when: true

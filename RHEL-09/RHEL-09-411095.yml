@@ -1,0 +1,83 @@
+---
+# STIG ID:   RHEL-09-411095
+# Vuln ID:   V-258058
+# Rule Title: RHEL 9 must not have unauthorized accounts.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-000366
+# Check:     Review interactive local accounts in /etc/passwd and compare with authorized list.
+# Fix:       Remove unauthorized local interactive user accounts.
+
+- name: STIG RHEL-09-411095 - Remove or report unauthorized interactive local accounts
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Provide this list via inventory/group_vars/extra-vars.
+    # Example: -e '{"authorized_interactive_users":["root","appadmin","secops"]}'
+    authorized_interactive_users: []
+
+    # Safety default: report and fail if unauthorized users exist.
+    # Set true only when you intend to remove unauthorized accounts.
+    remove_unauthorized_accounts: false
+
+  tasks:
+    - name: Ensure authorized_interactive_users is provided
+      ansible.builtin.assert:
+        that:
+          - authorized_interactive_users | length > 0
+        fail_msg: >-
+          Set authorized_interactive_users to the approved list of interactive local accounts
+          before running this control.
+
+    - name: Collect passwd database entries
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: Build list of local interactive accounts
+      ansible.builtin.set_fact:
+        interactive_local_accounts: []
+
+    - name: Add interactive accounts from passwd (UID >= 1000 and interactive shell)
+      ansible.builtin.set_fact:
+        interactive_local_accounts: "{{ (interactive_local_accounts + [item.key]) | unique }}"
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+      when:
+        - item.value[1] | int >= 1000
+        - item.value[5] is not match('^(|/sbin/nologin|/usr/sbin/nologin|/bin/false|/usr/bin/false)$')
+
+    - name: Determine unauthorized interactive accounts
+      ansible.builtin.set_fact:
+        unauthorized_accounts: "{{ interactive_local_accounts | difference(authorized_interactive_users) | sort }}"
+
+    - name: Remove unauthorized interactive accounts when enabled
+      ansible.builtin.user:
+        name: "{{ item }}"
+        state: absent
+        remove: true
+      loop: "{{ unauthorized_accounts }}"
+      when:
+        - remove_unauthorized_accounts | bool
+        - unauthorized_accounts | length > 0
+
+    - name: Fail when unauthorized accounts exist and removal is disabled
+      ansible.builtin.fail:
+        msg: >-
+          Unauthorized interactive local accounts found: {{ unauthorized_accounts | join(', ') }}.
+          Set remove_unauthorized_accounts=true to remediate automatically.
+      when:
+        - not remove_unauthorized_accounts | bool
+        - unauthorized_accounts | length > 0
+
+    - name: Verify no unauthorized interactive accounts remain after optional remediation
+      ansible.builtin.command:
+        cmd: getent passwd "{{ item }}"
+      loop: "{{ unauthorized_accounts }}"
+      register: unauthorized_verify
+      changed_when: false
+      failed_when:
+        - remove_unauthorized_accounts | bool
+        - unauthorized_verify.rc == 0
+      when:
+        - remove_unauthorized_accounts | bool
+        - unauthorized_accounts | length > 0

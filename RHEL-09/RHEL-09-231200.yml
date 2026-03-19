@@ -1,0 +1,49 @@
+---
+# STIG ID:   RHEL-09-231200
+# Vuln ID:   V-257881
+# Rule Title: RHEL 9 must prevent special devices on non-root local partitions.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-000366
+# Check:     mount | grep '^/dev\S* on /\S' | grep --invert-match 'nodev'
+#            Any non-root local partition without nodev is a finding.
+# Fix:       Configure /etc/fstab entries for non-root local partitions to include nodev.
+# Note:      vfat file systems are not applicable per STIG.
+
+- name: STIG RHEL-09-231200 - Enforce nodev on non-root local partitions
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Build list of non-root local partitions requiring nodev
+      ansible.builtin.set_fact:
+        nodev_target_mounts: >-
+          {{
+            ansible_facts.mounts
+            | selectattr('device', 'match', '^/dev/')
+            | rejectattr('mount', 'equalto', '/')
+            | rejectattr('fstype', 'equalto', 'vfat')
+            | rejectattr('options', 'search', '(^|,)nodev(,|$)')
+            | list
+          }}
+
+    - name: Persist nodev in /etc/fstab and remount target filesystems
+      ansible.posix.mount:
+        path: "{{ item.mount }}"
+        src: "{{ item.device }}"
+        fstype: "{{ item.fstype }}"
+        opts: "{{ ((item.options | default('defaults')).split(',') + ['nodev']) | unique | join(',') }}"
+        state: mounted
+      loop: "{{ nodev_target_mounts }}"
+      loop_control:
+        label: "{{ item.mount }}"
+      when: nodev_target_mounts | length > 0
+
+    - name: Verify non-root local partitions include nodev
+      ansible.builtin.command:
+        cmd: >-
+          findmnt -rn -o SOURCE,TARGET,FSTYPE,OPTIONS |
+          awk '$1 ~ /^\/dev\// && $2 != "/" && $3 != "vfat" && $4 !~ /(^|,)nodev(,|$)/ {print}'
+      register: nodev_verify
+      changed_when: false
+      failed_when: nodev_verify.stdout_lines | length > 0

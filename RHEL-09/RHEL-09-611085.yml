@@ -1,0 +1,48 @@
+---
+# STIG ID:   RHEL-09-611085
+# Vuln ID:   V-258106
+# Rule Title: RHEL 9 must require users to provide a password for privilege escalation.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-004895, CCI-002038
+# Check:     grep -iR 'NOPASSWD' /etc/sudoers /etc/sudoers.d/
+# Fix:       Remove/comment NOPASSWD entries in sudoers configuration.
+
+- name: STIG RHEL-09-611085 - Require password for sudo privilege escalation
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Comment NOPASSWD entries in /etc/sudoers
+      ansible.builtin.replace:
+        path: /etc/sudoers
+        regexp: '^(\s*[^#\n].*NOPASSWD.*)$'
+        replace: '# \1'
+        backup: true
+      validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Find files in /etc/sudoers.d
+      ansible.builtin.find:
+        paths: /etc/sudoers.d
+        file_type: file
+        recurse: false
+      register: sudoers_d_files
+      failed_when: false
+
+    - name: Comment NOPASSWD entries in /etc/sudoers.d files
+      ansible.builtin.replace:
+        path: "{{ item.path }}"
+        regexp: '^(\s*[^#\n].*NOPASSWD.*)$'
+        replace: '# \1'
+        backup: true
+      loop: "{{ sudoers_d_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}"
+      validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Verify no active NOPASSWD entries remain
+      ansible.builtin.command:
+        cmd: grep -iRs '^[[:space:]]*[^#].*NOPASSWD' /etc/sudoers /etc/sudoers.d
+      register: nopasswd_verify
+      changed_when: false
+      failed_when: nopasswd_verify.rc == 0

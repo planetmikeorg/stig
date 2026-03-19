@@ -1,0 +1,118 @@
+---
+# STIG ID:   RHEL-09-411055
+# Vuln ID:   V-258050
+# Rule Title: Executable search paths within the initialization files of all local
+#             interactive RHEL 9 users must only contain paths that resolve to the
+#             system default or the users home directory.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-000366
+# Check:     find /home -maxdepth 2 -type f -name ".[^^.]*" -exec grep -iH path= {} \;
+# Fix:       Update user initialization PATH statements to approved values.
+
+- name: STIG RHEL-09-411055 - Enforce approved PATH in local interactive user init files
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    approved_path: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:$HOME/.local/bin:$HOME/bin'
+    init_file_names:
+      - .bash_profile
+      - .bash_login
+      - .bash_logout
+      - .bashrc
+      - .profile
+      - .kshrc
+      - .cshrc
+      - .tcshrc
+      - .zshrc
+      - .zprofile
+      - .zlogin
+      - .zlogout
+      - .zshenv
+
+  tasks:
+    - name: Collect passwd database entries
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: Build list of local interactive user home directories
+      ansible.builtin.set_fact:
+        interactive_home_dirs: []
+
+    - name: Add interactive users from passwd to home directory list
+      ansible.builtin.set_fact:
+        interactive_home_dirs: "{{ (interactive_home_dirs + [item.value[4]]) | unique }}"
+      loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+      when:
+        - item.value[4] is match('^/')
+        - item.value[5] is not match('^(|/sbin/nologin|/usr/sbin/nologin|/bin/false|/usr/bin/false)$')
+        - (item.key == 'root') or (item.value[1] | int >= 1000)
+
+    - name: Keep only existing home directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ interactive_home_dirs | default([]) }}"
+      register: home_dir_stats
+
+    - name: Finalize existing home directories to process
+      ansible.builtin.set_fact:
+        existing_home_dirs: >-
+          {{
+            home_dir_stats.results
+            | selectattr('stat.exists', 'equalto', true)
+            | selectattr('stat.isdir', 'equalto', true)
+            | map(attribute='item')
+            | list
+          }}
+
+    - name: Find managed initialization files in each interactive home directory
+      ansible.builtin.find:
+        paths: "{{ item }}"
+        recurse: false
+        file_type: file
+        patterns: "{{ init_file_names }}"
+        hidden: true
+        use_regex: false
+      loop: "{{ existing_home_dirs }}"
+      register: init_files_found
+      changed_when: false
+
+    - name: Build flat list of initialization files
+      ansible.builtin.set_fact:
+        init_files_to_manage: >-
+          {{
+            init_files_found.results
+            | map(attribute='files')
+            | flatten
+            | map(attribute='path')
+            | list
+          }}
+
+    - name: Remove existing PATH assignment lines from managed init files
+      ansible.builtin.replace:
+        path: "{{ item }}"
+        regexp: '(?m)^\s*(?:export\s+)?PATH=.*\n?'
+        replace: ''
+        backup: true
+      loop: "{{ init_files_to_manage }}"
+      when: init_files_to_manage | length > 0
+
+    - name: Add approved PATH block to managed init files
+      ansible.builtin.blockinfile:
+        path: "{{ item }}"
+        marker: '# {mark} ANSIBLE MANAGED STIG RHEL-09-411055'
+        block: |
+          PATH="{{ approved_path }}"
+          export PATH
+      loop: "{{ init_files_to_manage }}"
+      when: init_files_to_manage | length > 0
+
+    - name: Verify approved PATH line is present in managed init files
+      ansible.builtin.command:
+        cmd: grep -qF "PATH=\"{{ approved_path }}\"" "{{ item }}"
+      loop: "{{ init_files_to_manage }}"
+      register: path_verify
+      changed_when: false
+      failed_when: path_verify is failed
+      when: init_files_to_manage | length > 0

@@ -1,0 +1,2 @@
+# Managed by Ansible for STIG RHEL-09-433016
+deny perm=any all : all

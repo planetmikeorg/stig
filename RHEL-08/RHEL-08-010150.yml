@@ -1,0 +1,42 @@
+---
+# STIG ID:   RHEL-08-010150
+# Vuln ID:   V-230235
+# Rule Title: RHEL 8 operating systems booted with a BIOS must require
+#             authentication upon booting into single-user and maintenance modes.
+# Severity:  High (CAT I)
+# CCI:       CCI-000213
+# Check:     sudo grep -iw grub2_password /boot/grub2/user.cfg
+#            Result must begin with "grub.pbkdf2.sha512"
+# Fix:       Write a PBKDF2 password hash to /boot/grub2/user.cfg
+# Note:      NOT APPLICABLE on UEFI systems.
+
+- name: STIG RHEL-08-010150 - Require GRUB2 bootloader password (BIOS systems)
+  hosts: all
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars.yml
+
+  pre_tasks:
+    - name: Skip play on UEFI systems (Not Applicable)
+      ansible.builtin.meta: end_host
+      when: ansible_facts['firmware_type'] | default('') == 'efi'
+
+  tasks:
+    - name: Write GRUB2 password hash to /boot/grub2/user.cfg
+      ansible.builtin.copy:
+        dest: "{{ grub2_user_cfg }}"
+        content: "GRUB2_PASSWORD={{ grub2_password_hash }}\n"
+        owner: root
+        group: root
+        mode: '0600'
+        backup: true
+
+    - name: Verify password hash begins with grub.pbkdf2.sha512
+      ansible.builtin.command:
+        cmd: grep -iw grub2_password "{{ grub2_user_cfg }}"
+      register: grub2_password_check
+      changed_when: false
+      failed_when: >
+        grub2_password_check.rc != 0 or
+        'grub.pbkdf2.sha512' not in grub2_password_check.stdout

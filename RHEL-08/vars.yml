@@ -1,0 +1,17 @@
+---
+# Shared variables for RHEL-08-010149 and RHEL-08-010150
+#
+# vault_grub2_password_hash must be defined in an Ansible Vault-encrypted file
+# (e.g. vault.yml) and passed at runtime:
+#   ansible-playbook -e @vault.yml --ask-vault-pass <playbook>
+
+# grub.pbkdf2.sha512 hash — generate with:  grub2-mkpasswd-pbkdf2
+grub2_password_hash: "{{ vault_grub2_password_hash }}"
+
+# GRUB2 superusers account name
+grub2_superusers: "superuser"
+
+# File paths
+grub2_user_cfg: /boot/grub2/user.cfg
+grub2_users_script: /etc/grub.d/01_users
+grub2_cfg: /boot/grub2/grub.cfg

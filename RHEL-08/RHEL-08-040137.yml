@@ -1,0 +1,117 @@
+---
+# STIG ID:   RHEL-08-040137
+# Vuln ID:   V-244546
+# Rule Title: The RHEL 8 fapolicy module must be configured to employ a
+#             deny-all, permit-by-exception policy to allow the execution of
+#             authorized software programs.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-001764
+# Satisfies: SRG-OS-000368-GPOS-00154, SRG-OS-000370-GPOS-00155,
+#            SRG-OS-000480-GPOS-00232
+# Check:     sudo grep permissive /etc/fapolicyd/fapolicyd.conf  → permissive = 0
+#            sudo tail /etc/fapolicyd/compiled.rules (>=8.5)
+#              or /etc/fapolicyd/fapolicyd.rules (<= 8.4)
+#            Last rule must be: deny perm=any all : all
+# Fix:       Set permissive = 0 in fapolicyd.conf; ensure deny-all final rule
+#            exists; enable and start the fapolicyd service.
+#
+# WARNING:   Improper fapolicyd configuration can render the system
+#            non-functional. Validate your rules whitelist thoroughly before
+#            running this playbook in production. Test in permissive mode first.
+
+- name: STIG RHEL-08-040137 - Configure fapolicyd deny-all, permit-by-exception
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    fapolicyd_conf: /etc/fapolicyd/fapolicyd.conf
+    # RHEL 8.5+ uses compiled.rules; 8.4 and older use fapolicyd.rules
+    fapolicyd_rules_new: /etc/fapolicyd/compiled.rules
+    fapolicyd_rules_old: /etc/fapolicyd/fapolicyd.rules
+    fapolicyd_rules_d: /etc/fapolicyd/rules.d
+    deny_all_rule: "deny perm=any all : all"
+
+  tasks:
+    - name: Ensure fapolicyd package is installed
+      ansible.builtin.package:
+        name: fapolicyd
+        state: present
+
+    # ── fapolicyd.conf: enforce permissive = 0 ────────────────────────────────
+    - name: Set permissive = 0 in /etc/fapolicyd/fapolicyd.conf
+      ansible.builtin.lineinfile:
+        path: "{{ fapolicyd_conf }}"
+        regexp: '^\s*permissive\s*='
+        line: 'permissive = 0'
+        state: present
+        backup: true
+      notify: Restart fapolicyd
+
+    # ── Deny-all rule: RHEL 8.5+ (compiled.rules via rules.d) ─────────────────
+    - name: Ensure deny-all rule file exists in rules.d (RHEL 8.5+)
+      ansible.builtin.lineinfile:
+        path: "{{ fapolicyd_rules_d }}/99-deny-all.rules"
+        line: "{{ deny_all_rule }}"
+        create: true
+        owner: root
+        group: fapolicyd
+        mode: '0644'
+      when: ansible_facts['distribution_major_version'] | int >= 9 or
+            (ansible_facts['distribution_major_version'] | int == 8 and
+             ansible_facts['distribution_version'] is version('8.5', '>='))
+      notify: Update fapolicyd rules (8.5+)
+
+    # ── Deny-all rule: RHEL 8.4 and older (fapolicyd.rules) ──────────────────
+    - name: Ensure deny-all is the last rule in fapolicyd.rules (RHEL <= 8.4)
+      ansible.builtin.lineinfile:
+        path: "{{ fapolicyd_rules_old }}"
+        line: "{{ deny_all_rule }}"
+        insertafter: EOF
+        state: present
+        backup: true
+      when: ansible_facts['distribution_version'] is version('8.5', '<')
+      notify: Restart fapolicyd
+
+    # ── Enable and start fapolicyd ────────────────────────────────────────────
+    - name: Enable and start fapolicyd service
+      ansible.builtin.service:
+        name: fapolicyd
+        enabled: true
+        state: started
+
+    # ── Verification ──────────────────────────────────────────────────────────
+    - name: Verify permissive = 0 in fapolicyd.conf
+      ansible.builtin.command:
+        cmd: grep -P '^\s*permissive\s*=\s*0' "{{ fapolicyd_conf }}"
+      register: permissive_check
+      changed_when: false
+      failed_when: permissive_check.rc != 0
+
+    - name: Verify deny-all final rule is present (RHEL 8.5+)
+      ansible.builtin.command:
+        cmd: tail -n 5 "{{ fapolicyd_rules_new }}"
+      register: compiled_rules_check
+      changed_when: false
+      failed_when: deny_all_rule not in compiled_rules_check.stdout
+      when: ansible_facts['distribution_version'] is version('8.5', '>=')
+
+    - name: Verify deny-all final rule is present (RHEL <= 8.4)
+      ansible.builtin.command:
+        cmd: tail -n 5 "{{ fapolicyd_rules_old }}"
+      register: old_rules_check
+      changed_when: false
+      failed_when: deny_all_rule not in old_rules_check.stdout
+      when: ansible_facts['distribution_version'] is version('8.5', '<')
+
+  handlers:
+    - name: Update fapolicyd rules (8.5+)
+      ansible.builtin.command:
+        cmd: fagenrules --load
+      changed_when: true
+      notify: Restart fapolicyd
+
+    - name: Restart fapolicyd
+      ansible.builtin.service:
+        name: fapolicyd
+        state: restarted

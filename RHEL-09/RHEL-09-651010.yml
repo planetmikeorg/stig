@@ -1,0 +1,60 @@
+---
+# STIG ID:   RHEL-09-651010
+# Vuln ID:   V-258134
+# Rule Title: RHEL 9 must have the AIDE package installed.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-001744, CCI-002696
+# Check:     dnf list installed aide
+# Fix:       Install AIDE, initialize database, and run integrity check as needed.
+
+- name: STIG RHEL-09-651010 - Ensure AIDE is installed and initialized
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    aide_db: /var/lib/aide/aide.db.gz
+    aide_db_new: /var/lib/aide/aide.db.new.gz
+
+    # Optional runtime-intensive check
+    run_aide_check: false
+
+  tasks:
+    - name: Ensure aide package is installed
+      ansible.builtin.package:
+        name: aide
+        state: present
+
+    - name: Check whether initialized AIDE database exists
+      ansible.builtin.stat:
+        path: "{{ aide_db }}"
+      register: aide_db_stat
+
+    - name: Initialize AIDE database when not yet initialized
+      ansible.builtin.command:
+        cmd: /usr/sbin/aide --init
+      when: not aide_db_stat.stat.exists
+
+    - name: Promote new AIDE database to active location
+      ansible.builtin.copy:
+        src: "{{ aide_db_new }}"
+        dest: "{{ aide_db }}"
+        owner: root
+        group: root
+        mode: '0600'
+        remote_src: true
+      when: not aide_db_stat.stat.exists
+
+    - name: Verify aide package is installed
+      ansible.builtin.command:
+        cmd: rpm -q aide
+      register: aide_pkg_verify
+      changed_when: false
+      failed_when: aide_pkg_verify.rc != 0
+
+    - name: Optionally run aide integrity check
+      ansible.builtin.command:
+        cmd: /usr/sbin/aide --check
+      register: aide_check
+      changed_when: false
+      when: run_aide_check | bool
