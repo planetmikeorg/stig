@@ -1,0 +1,114 @@
+---
+# STIG ID:   RHEL-08-020352
+# Vuln ID:   V-230384
+# Rule Title: RHEL 8 must set the umask value to 077 for all local interactive
+#             user accounts.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-000366
+# Check:     grep -ir ^umask /home | grep -v '.bash_history'
+#            Any umask value less restrictive than 077 is a finding.
+# Fix:       Remove umask statements from local interactive user initialization
+#            files, or set them to 077 if removal is not appropriate.
+
+- name: STIG RHEL-08-020352 - Enforce umask 077 in local interactive user init files
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    required_umask: '077'
+    init_file_names:
+      - .bash_profile
+      - .bash_login
+      - .bash_logout
+      - .bashrc
+      - .profile
+      - .kshrc
+      - .cshrc
+      - .tcshrc
+      - .zshrc
+      - .zprofile
+      - .zlogin
+      - .zlogout
+      - .zshenv
+
+  tasks:
+    - name: Collect passwd database entries
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: Build list of local interactive user home directories
+      ansible.builtin.set_fact:
+        interactive_home_dirs: >-
+          {{
+            ansible_facts.getent_passwd
+            | dict2items
+            | selectattr('value.4', 'match', '^/')
+            | rejectattr('value.5', 'match',
+                '^(|/sbin/nologin|/usr/sbin/nologin|/bin/false|/usr/bin/false)$')
+            | selectattr('value.1', 'match', '^([0-9]+)$')
+            | selectattr('value.1', 'gt', '999')
+            | map(attribute='value')
+            | map(attribute=4)
+            | list
+            | unique
+          }}
+
+    - name: Keep only existing home directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ interactive_home_dirs }}"
+      register: home_dir_stats
+
+    - name: Finalize existing home directories to scan
+      ansible.builtin.set_fact:
+        existing_home_dirs: >-
+          {{
+            home_dir_stats.results
+            | selectattr('stat.exists', 'equalto', true)
+            | selectattr('stat.isdir', 'equalto', true)
+            | map(attribute='item')
+            | list
+          }}
+
+    - name: Find local initialization files in each home directory
+      ansible.builtin.find:
+        paths: "{{ item }}"
+        recurse: false
+        file_type: file
+        patterns: "{{ init_file_names }}"
+        hidden: true
+        use_regex: false
+      loop: "{{ existing_home_dirs }}"
+      register: init_files_found
+      changed_when: false
+
+    - name: Build flat list of initialization file paths
+      ansible.builtin.set_fact:
+        init_file_paths: >-
+          {{
+            init_files_found.results
+            | map(attribute='files')
+            | flatten
+            | map(attribute='path')
+            | list
+          }}
+
+    - name: Remove umask statements that are less restrictive than 077
+      ansible.builtin.replace:
+        path: "{{ item }}"
+        regexp: '(?m)^\s*umask\s+(?!077\b)\S+.*\n?'
+        replace: ''
+        backup: true
+      loop: "{{ init_file_paths }}"
+      when: init_file_paths | length > 0
+
+    - name: Verify no umask less restrictive than 077 remains in init files
+      ansible.builtin.shell:
+        cmd: >-
+          grep -irl '^umask' {{ init_file_paths | join(' ') }} |
+          xargs -r grep --with-filename -P '^umask\s+(?!077\b)' || true
+      register: umask_verify
+      changed_when: false
+      failed_when: umask_verify.stdout_lines | length > 0
+      when: init_file_paths | length > 0

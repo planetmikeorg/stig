@@ -4,11 +4,14 @@ This folder contains Ansible playbooks for selected RHEL 8 STIG controls.
 
 ## Playbooks
 
-- `RHEL-08-010149.yml` GRUB2 unique superusers name (BIOS systems)
-- `RHEL-08-010150.yml` GRUB2 password requirement (BIOS systems)
-- `RHEL-08-010190.yml` Sticky bit on world-writable directories
-- `RHEL-08-010770.yml` Local initialization files mode 0740 or less permissive
-- `RHEL-08-040137.yml` fapolicyd deny-all, permit-by-exception policy
+| Playbook | STIG | Description |
+|---|---|---|
+| `RHEL-08-010149.yml` | [RHEL-08-010149](https://stigaview.com/products/rhel8/v2r6/RHEL-08-010149/) | GRUB2 unique superusers name (BIOS systems) |
+| `RHEL-08-010150.yml` | [RHEL-08-010150](https://stigaview.com/products/rhel8/v2r6/RHEL-08-010150/) | GRUB2 password requirement (BIOS systems) |
+| `RHEL-08-010190.yml` | [RHEL-08-010190](https://stigaview.com/products/rhel8/v2r6/RHEL-08-010190/) | Sticky bit on world-writable directories |
+| `RHEL-08-010770.yml` | [RHEL-08-010770](https://stigaview.com/products/rhel8/v2r6/RHEL-08-010770/) | Local initialization files mode 0740 or less permissive |
+| `RHEL-08-020352.yml` | [RHEL-08-020352](https://stigaview.com/products/rhel8/v2r6/RHEL-08-020352/) | Enforce umask 077 in local interactive user initialization files |
+| `RHEL-08-040137.yml` | [RHEL-08-040137](https://stigaview.com/products/rhel8/v2r6/RHEL-08-040137/) | fapolicyd deny-all, permit-by-exception policy |
 
 ## Shared Variables
 

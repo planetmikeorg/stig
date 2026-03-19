@@ -19,6 +19,10 @@ Example:
 ansible-playbook -i inventory.ini RHEL-09/RHEL-09-213020.yml
 ```
 
+## References
+
+- [STIG A-View — RHEL 8 & RHEL 9 products](https://stigaview.com/products/)
+
 ## Notes
 
 - Some controls are intentionally strict and may affect user or application behavior.

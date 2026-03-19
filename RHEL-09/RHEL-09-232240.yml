@@ -1,0 +1,39 @@
+---
+# STIG ID:   RHEL-09-232240
+# Vuln ID:   V-257928
+# Rule Title: All RHEL 9 world-writable directories must be owned by root,
+#             sys, bin, or an application user.
+# Severity:  Medium (CAT II)
+# CCI:       CCI-001090
+# Check:     find / -xdev -type d -perm -0002 -uid +999 -exec stat -c "%U, %u, %A, %n" {} \;
+#            Any world-writable directory owned by a non-system account (UID > 999)
+#            is a finding.
+# Fix:       chown root <offending directory>
+
+- name: STIG RHEL-09-232240 - World-writable directories must be owned by root or system account
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Find world-writable directories owned by non-system accounts (UID > 999)
+      ansible.builtin.command:
+        cmd: find / -xdev -type d -perm -0002 -uid +999
+      register: ww_dirs_noncompliant
+      changed_when: false
+      failed_when: false
+
+    - name: Set ownership to root on noncompliant world-writable directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        state: directory
+      loop: "{{ ww_dirs_noncompliant.stdout_lines }}"
+      when: ww_dirs_noncompliant.stdout_lines | length > 0
+
+    - name: Verify no world-writable directories remain with non-system ownership
+      ansible.builtin.command:
+        cmd: find / -xdev -type d -perm -0002 -uid +999
+      register: ww_dirs_verify
+      changed_when: false
+      failed_when: ww_dirs_verify.stdout_lines | length > 0
