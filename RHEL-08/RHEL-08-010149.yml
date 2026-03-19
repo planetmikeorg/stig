@@ -10,8 +10,8 @@
 #            Must return:  set superusers="<unique_name>"
 # Fix:       Write /etc/grub.d/01_users and regenerate /boot/grub2/grub.cfg
 # Note:      NOT APPLICABLE on UEFI systems.
-#            Run RHEL-08-010150.yml first to ensure user.cfg exists with a
-#            valid GRUB2_PASSWORD before running this playbook.
+#            This playbook is self-contained and does not depend on
+#            RHEL-08-010150.yml.
 
 - name: STIG RHEL-08-010149 - Require unique GRUB2 superusers name (BIOS systems)
   hosts: all
@@ -34,7 +34,7 @@
           cat << EOF
           set superusers="{{ grub2_superusers }}"
           export superusers
-          password_pbkdf2 {{ grub2_superusers }} ${GRUB2_PASSWORD}
+          password_pbkdf2 {{ grub2_superusers }} {{ grub2_password_hash }}
           EOF
         owner: root
         group: root

@@ -28,4 +28,4 @@ ansible-playbook -i inventory.ini RHEL-08-010149.yml -e @vault.yml --ask-vault-p
 ## Notes
 
 - GRUB2 controls are not applicable to UEFI systems in the current playbook logic.
-- For `RHEL-08-010149.yml`, run `RHEL-08-010150.yml` first so `GRUB2_PASSWORD` is present.
+- `RHEL-08-010149.yml` and `RHEL-08-010150.yml` can be run independently when required variables are provided.
