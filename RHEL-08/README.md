@@ -21,11 +21,47 @@ Expected vault variable:
 
 - `vault_grub2_password_hash`
 
+`RHEL-08-010149.yml` and `RHEL-08-010150.yml` can now generate a unique GRUB2
+password per host and
+store it in 1Password when enabled in `vars.yml`:
+
+- `grub2_manage_password_in_1password: true`
+- `grub2_1password_connect_host`: 1Password Connect server URL (required)
+- `grub2_1password_vault_id`: target 1Password vault ID (required)
+- `grub2_1password_username`: username field stored in each item
+
+Optional secure variable (recommended in Vault):
+
+- `vault_grub2_1password_connect_token`
+
+Item title is the host name (`inventory_hostname`).
+
+Prerequisites on the Ansible controller:
+
+- 1Password Connect server deployed and reachable
+- 1Password Ansible collection installed:
+	- `ansible-galaxy collection install onepassword.connect`
+- Connect token with access to the configured vault ID
+
 ## Run Examples
 
 ```bash
 ansible-playbook -i inventory.ini RHEL-08-010150.yml -e @vault.yml --ask-vault-pass
 ansible-playbook -i inventory.ini RHEL-08-010149.yml -e @vault.yml --ask-vault-pass
+
+# RHEL-08-010149 with 1Password integration
+ansible-playbook -i inventory.ini RHEL-08-010149.yml \
+	-e "grub2_1password_connect_host=https://connect.example.com" \
+	-e "grub2_1password_vault_id=vault-uuid" \
+	-e "grub2_1password_connect_token=<connect-token>" \
+	-e "grub2_1password_username=superuser"
+
+# RHEL-08-010150 with 1Password integration
+ansible-playbook -i inventory.ini RHEL-08-010150.yml \
+	-e "grub2_1password_connect_host=https://connect.example.com" \
+	-e "grub2_1password_vault_id=vault-uuid" \
+	-e "grub2_1password_connect_token=<connect-token>" \
+	-e "grub2_1password_username=superuser"
 ```
 
 ## Notes

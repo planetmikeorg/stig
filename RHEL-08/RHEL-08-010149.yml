@@ -25,6 +25,69 @@
       ansible.builtin.meta: end_host
       when: ansible_facts['firmware_type'] | default('') == 'efi'
 
+    - name: Generate strong GRUB2 password per host
+      ansible.builtin.set_fact:
+        grub2_generated_password: >-
+          {{ lookup('ansible.builtin.password', '/dev/null',
+          length=grub2_password_length, chars=grub2_password_charset) }}
+      when: grub2_manage_password_in_1password | bool
+      no_log: true
+
+    - name: Build PBKDF2 hash from generated password
+      ansible.builtin.shell: |
+        set -o pipefail
+        grub2-mkpasswd-pbkdf2 << 'EOF' | awk '/grub.pbkdf2/{print $7}'
+        {{ grub2_generated_password }}
+        {{ grub2_generated_password }}
+        EOF
+      args:
+        executable: /bin/bash
+      register: grub2_generated_password_hash_cmd
+      changed_when: false
+      when: grub2_manage_password_in_1password | bool
+      no_log: true
+
+    - name: Set active GRUB2 password hash
+      ansible.builtin.set_fact:
+        grub2_password_hash_active: >-
+          {{
+            (grub2_generated_password_hash_cmd.stdout | trim)
+            if (grub2_manage_password_in_1password | bool)
+            else grub2_password_hash
+          }}
+      no_log: true
+
+    - name: Validate 1Password vault variable when enabled
+      ansible.builtin.assert:
+        that:
+          - grub2_1password_connect_host | string | length > 0
+          - grub2_1password_connect_token | string | length > 0
+          - grub2_1password_vault_id | string | length > 0
+        fail_msg: >-
+          Set grub2_1password_connect_host, grub2_1password_connect_token,
+          and grub2_1password_vault_id when grub2_manage_password_in_1password=true.
+      when: grub2_manage_password_in_1password | bool
+
+    - name: Insert GRUB2 credential in 1Password per host
+      onepassword.connect.generic_item:
+        hostname: "{{ grub2_1password_connect_host }}"
+        token: "{{ grub2_1password_connect_token }}"
+        vault_id: "{{ grub2_1password_vault_id }}"
+        title: "{{ inventory_hostname }}"
+        state: present
+        fields:
+          - label: username
+            value: "{{ grub2_1password_username }}"
+          - label: password
+            value: "{{ grub2_generated_password }}"
+            field_type: concealed
+          - label: notes
+            value: "{{ grub2_1password_notes }}"
+      delegate_to: localhost
+      become: false
+      when: grub2_manage_password_in_1password | bool
+      no_log: true
+
   tasks:
     - name: Write /etc/grub.d/01_users with unique superusers name
       ansible.builtin.copy:
@@ -34,7 +97,7 @@
           cat << EOF
           set superusers="{{ grub2_superusers }}"
           export superusers
-          password_pbkdf2 {{ grub2_superusers }} {{ grub2_password_hash }}
+          password_pbkdf2 {{ grub2_superusers }} {{ grub2_password_hash_active }}
           EOF
         owner: root
         group: root
